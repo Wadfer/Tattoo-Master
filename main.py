@@ -996,11 +996,11 @@ class ServicesWindow(QtWidgets.QWidget):
         self.table.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(["Название", "Цена (руб.)", "Комментарий"])
-        # Настроим приоритеты растяжения: название и описание растягиваются, цена — по содержимому
+        # Настроим приоритеты растяжения: название и комментарий растягиваются, цена — по содержимому
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)        # Название
         header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)  # Цена
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)        # Описание
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)        # Комментарий
         self.table.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         # Таблица read-only, редактирование через двойной клик
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -1304,6 +1304,7 @@ class SketchesWindow(QtWidgets.QWidget):
 
         btn_back.clicked.connect(self.close)
         btn_add.clicked.connect(self.add_sketch)
+        self.list_widget.itemDoubleClicked.connect(self.on_sketch_double_click)
 
         self._load_sketches()
 
@@ -1339,6 +1340,14 @@ class SketchesWindow(QtWidgets.QWidget):
                         item.setIcon(QtGui.QIcon(pixmap))
 
             self.list_widget.addItem(item)
+
+    def on_sketch_double_click(self, item: QtWidgets.QListWidgetItem):
+        """Редактировать эскиз по двойному клику."""
+        if item is None:
+            return
+        sketch_id = item.data(QtCore.Qt.UserRole)
+        if sketch_id is not None:
+            self.edit_sketch(sketch_id)
 
     def add_sketch(self):
         """Добавление нового эскиза."""
@@ -1417,6 +1426,128 @@ class SketchesWindow(QtWidgets.QWidget):
                 cur.execute(
                     "INSERT INTO \"эскизы\" (title, description, image_path) VALUES (?, ?, ?)",
                     (title, description, str(target_path)),
+                )
+                conn.commit()
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+            self._load_sketches()
+            dialog.accept()
+
+        btn_save.clicked.connect(on_save)
+        btn_cancel.clicked.connect(dialog.reject)
+
+        dialog.exec_()
+
+    def edit_sketch(self, sketch_id: int):
+        """Редактирование существующего эскиза."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cur = conn.cursor()
+            cur.execute('SELECT title, description, image_path FROM "эскизы" WHERE id = ?', (sketch_id,))
+            row = cur.fetchone()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        if not row:
+            QtWidgets.QMessageBox.warning(self, "Ошибка", "Эскиз не найден.")
+            return
+
+        current_title, current_description, current_image_path = row
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Редактировать эскиз")
+        dialog_layout = QtWidgets.QVBoxLayout(dialog)
+
+        form = QtWidgets.QFormLayout()
+        title_edit = QtWidgets.QLineEdit()
+        description_edit = QtWidgets.QTextEdit()
+        image_path_edit = QtWidgets.QLineEdit()
+        image_path_edit.setReadOnly(True)
+        select_btn = QtWidgets.QPushButton("Выбрать изображение")
+
+        title_edit.setText(current_title or "")
+        description_edit.setPlainText(current_description or "")
+        image_path_edit.setText(current_image_path or "")
+
+        def choose_image():
+            file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                dialog,
+                "Выбор изображения",
+                "",
+                "Изображения (*.png *.jpg *.jpeg *.bmp *.gif)",
+            )
+            if file_path:
+                image_path_edit.setText(file_path)
+
+        select_btn.clicked.connect(choose_image)
+
+        form.addRow("Название*:", title_edit)
+        form.addRow("Описание:", description_edit)
+        image_layout = QtWidgets.QHBoxLayout()
+        image_layout.addWidget(image_path_edit)
+        image_layout.addWidget(select_btn)
+        form.addRow("Файл изображения*:", image_layout)
+
+        dialog_layout.addLayout(form)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        btn_save = QtWidgets.QPushButton("Сохранить")
+        btn_cancel = QtWidgets.QPushButton("Отмена")
+        buttons_layout.addStretch(1)
+        buttons_layout.addWidget(btn_save)
+        buttons_layout.addWidget(btn_cancel)
+        buttons_layout.addStretch(1)
+
+        dialog_layout.addLayout(buttons_layout)
+
+        def on_save():
+            title = title_edit.text().strip()
+            image_source = image_path_edit.text().strip()
+            description = description_edit.toPlainText().strip()
+
+            if not title or not image_source:
+                QtWidgets.QMessageBox.warning(
+                    dialog,
+                    "Ошибка",
+                    "Необходимо указать название и выбрать файл изображения.",
+                )
+                return
+
+            # Определяем путь к исходному файлу (для проверки существования)
+            src_path = Path(image_source)
+            if not src_path.is_absolute():
+                src_path = Path.cwd() / src_path
+
+            if not src_path.exists():
+                QtWidgets.QMessageBox.warning(dialog, "Ошибка", "Выбранный файл не существует.")
+                return
+
+            final_image_path = image_source
+
+            # Если выбран новый файл, копируем его в медиакаталог
+            if image_source != (current_image_path or ""):
+                target_name = f"{int(QtCore.QDateTime.currentSecsSinceEpoch())}_{src_path.name}"
+                target_path = self.media_dir / target_name
+                try:
+                    shutil.copy(src_path, target_path)
+                except OSError as exc:
+                    QtWidgets.QMessageBox.critical(dialog, "Ошибка копирования", str(exc))
+                    return
+                final_image_path = str(target_path)
+
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    'UPDATE "эскизы" SET title = ?, description = ?, image_path = ? WHERE id = ?',
+                    (title, description, final_image_path, sketch_id),
                 )
                 conn.commit()
             finally:
