@@ -1909,7 +1909,10 @@ def main():
     app.setStyleSheet(app.styleSheet() + 
         "QTableWidget::item:selected, QTableView::item:selected { background-color: #3a78c7; color: #ffffff; }")
 
-    db_path = Path(DB_NAME)
+    # Используем БД из подкаталога sqlite_data (совместимо с docker volume)
+    db_path = Path("sqlite_data/app.db")
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
     # Подготовка/миграция старой базы и переименование таблиц при необходимости
     _prepare_and_migrate_db(db_path)
     init_db(db_path)
