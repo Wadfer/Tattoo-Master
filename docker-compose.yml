@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  sqlite:
+    image: alpine:latest
+    container_name: sqlite-container
+    volumes:
+      - ./sqlite_data:/data
+    command: >
+      sh -c "
+      apk add --no-cache sqlite &&
+      echo 'SQLite запущен.' &&
+      sqlite3 /data/app.db 'SELECT sqlite_version();' &&
+      tail -f /dev/null
+      "
