@@ -8,85 +8,18 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 
 
 class PhoneMaskEdit(QtWidgets.QLineEdit):
-    """Поле ввода телефона с маской +7-___-___-__-__"""
-    
-    MASK = "+7-___-___-__-__"
-    
+    """
+    Поле ввода телефона без жёсткой маски.
+
+    Разрешаем пользователю вводить номер в любом удобном виде
+    (+79991234567, 8 999 123-45-67 и т.п.), а корректность проверяем
+    уже при сохранении по количеству цифр.
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setText(self.MASK)
-        self.setCursorPosition(3)  # После +7-
-        self.textChanged.connect(self._on_text_changed)
-        self.cursorPositionChanged.connect(self._on_cursor_changed)
-    
-    def _on_text_changed(self):
-        """Обработка ввода текста с маской."""
-        text = self.text()
-        cursor_pos = self.cursorPosition()
-        
-        # Если текст не начинается с маски, восстанавливаем
-        if not text.startswith("+7-"):
-            self.blockSignals(True)
-            self.setText(self.MASK)
-            self.setCursorPosition(3)
-            self.blockSignals(False)
-            return
-        
-        # Проходим по маске и заменяем _ на цифры
-        result = list(self.MASK)
-        text_idx = 0
-        
-        for i in range(len(self.MASK)):
-            if text_idx >= len(text):
-                break
-            
-            if self.MASK[i] == '_':
-                # Это место для цифры
-                if text_idx < len(text) and text[text_idx].isdigit():
-                    result[i] = text[text_idx]
-                    text_idx += 1
-                else:
-                    # Пропускаем символ, если это не цифра
-                    text_idx += 1
-                    i -= 1  # Повторно проверяем текущую позицию
-            elif i < len(text) and text[i] == self.MASK[i]:
-                text_idx += 1
-        
-        new_text = ''.join(result)
-        
-        # Обновляем текст, только если он изменился
-        if self.text() != new_text:
-            self.blockSignals(True)
-            self.setText(new_text)
-            self.blockSignals(False)
-            
-            # Позиционируем курсор правильно
-            if cursor_pos > len(new_text):
-                self.setCursorPosition(len(new_text))
-            else:
-                self.setCursorPosition(cursor_pos)
-    
-    def _on_cursor_changed(self):
-        """Пропускать дефисы при навигации."""
-        cursor_pos = self.cursorPosition()
-        text = self.text()
-        
-        # Если курсор на дефисе, переместим его на следующее подчёркивание
-        if cursor_pos < len(text) and text[cursor_pos] == '-':
-            self.setCursorPosition(cursor_pos + 1)
-    
-    def keyPressEvent(self, event):
-        """Переопределить обработку клавиш."""
-        cursor_pos = self.cursorPosition()
-        text = self.text()
-        
-        # Если пользователь нажимает Delete или Backspace на дефисе, пропускаем его
-        if event.key() in (QtCore.Qt.Key_Delete, QtCore.Qt.Key_Backspace):
-            if cursor_pos < len(text) and text[cursor_pos] == '-':
-                self.setCursorPosition(cursor_pos + 1)
-                return
-        
-        super().keyPressEvent(event)
+        # Подсказка по ожидаемому формату, но без ограничения ввода
+        self.setPlaceholderText("+7XXXXXXXXXX")
 
 
 class NewSessionDialog(QtWidgets.QDialog):
@@ -744,11 +677,15 @@ class ClientsWindow(QtWidgets.QWidget):
         birthday_edit.mousePressEvent = lambda event: (choose_birthday(), None)[1]
 
         def validate_russian_phone(phone: str) -> bool:
-            """Проверить формат российского номера телефона."""
-            import re
-            # Формат: +7 (XXX) XXX-XXXX или похожие варианты
-            pattern = r'^(\+7|8)\s?\(?\d{3}\)?\s?\d{3}[-]?\d{2}[-]?\d{2}$'
-            return bool(re.match(pattern, phone.replace(" ", "")))
+            """Проверить российский номер по количеству цифр без строгого формата."""
+            digits = "".join(ch for ch in phone if ch.isdigit())
+            if len(digits) < 10 or len(digits) > 15:
+                return False
+            # Приводим номера, начинающиеся с 8, к формату на 7
+            if digits.startswith("8"):
+                digits = "7" + digits[1:]
+            # Ожидаем российский номер: 11 цифр и начинается с 7
+            return len(digits) == 11 and digits.startswith("7")
 
         def on_save():
             name = name_edit.text().strip()
@@ -922,11 +859,13 @@ class ClientsWindow(QtWidgets.QWidget):
         birthday_edit.mousePressEvent = lambda event: (choose_birthday(), None)[1]
 
         def validate_russian_phone(phone: str) -> bool:
-            """Проверить формат российского номера телефона."""
-            import re
-            # Формат: +7 (XXX) XXX-XXXX или похожие варианты
-            pattern = r'^(\+7|8)\s?\(?\d{3}\)?\s?\d{3}[-]?\d{2}[-]?\d{2}$'
-            return bool(re.match(pattern, phone.replace(" ", "")))
+            """Проверить российский номер по количеству цифр без строгого формата."""
+            digits = "".join(ch for ch in phone if ch.isdigit())
+            if len(digits) < 10 or len(digits) > 15:
+                return False
+            if digits.startswith("8"):
+                digits = "7" + digits[1:]
+            return len(digits) == 11 and digits.startswith("7")
 
         def on_save():
             new_name = name_edit.text().strip()
