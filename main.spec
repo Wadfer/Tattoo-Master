@@ -5,8 +5,18 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('salon_db.sqlite', '.')],
-    hiddenimports=[],
+    datas=[('tattoo_db.sqlite', '.')],
+    hiddenimports=[
+        # customtkinter / tkinter internals
+        'tkinter',
+        'tkinter.filedialog',
+        'tkinter.messagebox',
+        # pillow (used for sketch thumbnails)
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageFile',
+        'PIL.ImageTk',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

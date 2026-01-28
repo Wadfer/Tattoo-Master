@@ -67,7 +67,7 @@ def open_add_finance_dialog(app):
         "Тип": ctk.CTkComboBox(dialog, values=["Доход", "Расход"]),
         "Сумма": ctk.CTkEntry(dialog, placeholder_text="Например, 1500.50"),
         "Дата": ctk.CTkEntry(dialog),
-        "Описание": ctk.CTkEntry(dialog, placeholder_text="Например, Стрижка или Аренда")
+        "Описание": ctk.CTkEntry(dialog, placeholder_text="например: Консультация")
     }
     fields["Тип"].set("Доход")
     fields["Дата"].insert(0, datetime.date.today().strftime('%Y-%m-%d'))

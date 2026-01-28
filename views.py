@@ -4,7 +4,13 @@ import calendar
 import tkinter as tk
 from tkinter import messagebox
 import locale
+import os
 from dialogs import time_str_to_minutes, minutes_to_time_str, get_appointment_duration
+
+try:
+    from PIL import Image
+except Exception:  # Pillow может отсутствовать в окружении
+    Image = None
 
 def get_monthly_finance_data(conn, target_date):
     year, month = target_date.year, target_date.month
@@ -446,8 +452,57 @@ def display_entity_cards(app, entity_name, records, columns):
         ).grid(row=0, column=0, padx=10, pady=5, sticky="w")
 
         data_rows = 1
+
+        # Мини-превью прикреплённого файла для карточек "Эскизы"
+        if entity_name == "Эскизы":
+            file_path = (record["Файл"] or "").strip() if "Файл" in record.keys() else ""
+
+            thumb_container = ctk.CTkFrame(card, fg_color="transparent")
+            thumb_container.grid(row=1, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 6))
+
+            thumb_w, thumb_h = 90, 70
+            if file_path and os.path.exists(file_path) and Image is not None:
+                try:
+                    pil_img = Image.open(file_path)
+                    pil_img.thumbnail((thumb_w, thumb_h))
+                    ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
+                    lbl = ctk.CTkLabel(thumb_container, text="", image=ctk_img)
+                    lbl.pack(anchor="e")
+                    # Важно: держим ссылку, иначе картинка может пропасть из-за GC
+                    card._thumb_img = ctk_img
+                except Exception:
+                    placeholder = ctk.CTkFrame(
+                        thumb_container,
+                        width=thumb_w,
+                        height=thumb_h,
+                        corner_radius=8,
+                        fg_color="#2B2B2B",
+                        border_width=1,
+                        border_color="#333333",
+                    )
+                    placeholder.pack_propagate(False)
+                    placeholder.pack(anchor="e")
+                    ctk.CTkLabel(placeholder, text="нет фото", text_color="#AAAAAA").pack(expand=True)
+            else:
+                placeholder = ctk.CTkFrame(
+                    thumb_container,
+                    width=thumb_w,
+                    height=thumb_h,
+                    corner_radius=8,
+                    fg_color="#2B2B2B",
+                    border_width=1,
+                    border_color="#333333",
+                )
+                placeholder.pack_propagate(False)
+                placeholder.pack(anchor="e")
+                ctk.CTkLabel(placeholder, text="нет фото", text_color="#AAAAAA").pack(expand=True)
+
+            data_rows = 2
+
         for name in column_names:
             if name.upper() == "ID":
+                continue
+            if entity_name == "Эскизы" and name == "Файл":
                 continue
 
             value = str(record[name])
