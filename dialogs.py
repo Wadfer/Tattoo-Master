@@ -21,31 +21,27 @@ def minutes_to_time_str(minutes: int) -> str:
 
 
 def get_appointment_duration(conn, appointment_id, default_service_id=None) -> int:
-
+    """Продолжительность сеанса в минутах, основанная на одной услуге в поле ID_Услуги."""
     cur = conn.cursor()
 
-    cur.execute(
-        'SELECT u."Длительность" FROM "Запись_Услуги" zu '
-        'JOIN "Услуги" u ON zu."ID_Услуги" = u.ID '
-        'WHERE zu."ID_Записи" = ?',
-        (appointment_id,)
-    )
-    rows = cur.fetchall()
-    durations = [int(r["Длительность"]) for r in rows if r["Длительность"]]
+    service_id = default_service_id
+    if not service_id:
+        # Пытаемся взять услугу из самой записи
+        cur.execute('SELECT "ID_Услуги" FROM "Записи" WHERE ID = ?', (appointment_id,))
+        row = cur.fetchone()
+        service_id = row["ID_Услуги"] if row else None
 
-    if not durations and default_service_id:
-        cur.execute(
-            'SELECT "Длительность" FROM "Услуги" WHERE ID = ?',
-            (default_service_id,)
-        )
+    if service_id:
+        cur.execute('SELECT "Длительность" FROM "Услуги" WHERE ID = ?', (service_id,))
         r = cur.fetchone()
         if r and r["Длительность"]:
-            durations = [int(r["Длительность"])]
+            try:
+                return int(r["Длительность"])
+            except Exception:
+                pass
 
-    if not durations:
-        return 30
-
-    return sum(durations)
+    # Значение по умолчанию, если ничего не нашли
+    return 30
 
 def center_dialog(parent, dialog):
     dialog.update_idletasks()
@@ -253,7 +249,7 @@ def open_edit_service_dialog(app):
                                          padx=10, pady=10, sticky="ew")
 
 def open_add_appointment_dialog(app):
-    """Диалог добавления записи (appointment) с несколькими услугами (тату-мастер)."""
+    """Диалог добавления записи (сеанса) с одной выбранной услугой."""
     dialog = ctk.CTkToplevel(app)
     dialog.title("Добавить: Запись")
     center_dialog(app, dialog)
@@ -267,6 +263,15 @@ def open_add_appointment_dialog(app):
 
     cursor.execute('SELECT ID, "Название", "Длительность" FROM "Услуги" ORDER BY "Название"')
     all_services = cursor.fetchall()
+    service_name_to_info = {
+        s["Название"]: (s["ID"], int(s["Длительность"] or 30))
+        for s in all_services
+        if s["Название"]
+    }
+
+    cursor.execute('SELECT "ID", "Название" FROM "Эскизы" ORDER BY "Название"')
+    sketches = cursor.fetchall()
+    name_to_id_sketch = {s["Название"]: s["ID"] for s in sketches if s["Название"]}
 
     fields = {}
     row = 0
@@ -361,25 +366,18 @@ def open_add_appointment_dialog(app):
     fields['ID_Клиента'] = combo_cli
     row += 1
 
-    ctk.CTkLabel(dialog, text="Услуги").grid(row=row, column=0, padx=10, pady=5, sticky="nw")
-    services_frame = ctk.CTkScrollableFrame(dialog, height=160)
-    services_frame.grid(row=row, column=1, columnspan=2, padx=10, pady=5, sticky="nsew")
+    if name_to_id_sketch:
+        ctk.CTkLabel(dialog, text="Эскиз (опционально)").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        combo_sketch = ctk.CTkComboBox(dialog, values=list(name_to_id_sketch.keys()))
+        combo_sketch.set("")
+        combo_sketch.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+        fields["ID_Эскиза"] = combo_sketch
+        row += 1
+
+    ctk.CTkLabel(dialog, text="Услуга").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+    combo_service = ctk.CTkComboBox(dialog, values=list(service_name_to_info.keys()))
+    combo_service.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
     row += 1
-
-    service_vars = []  # список (ID_услуги, tk.IntVar, длительность, название)
-    for i, s in enumerate(all_services):
-        var = tk.IntVar()
-        txt = f'{s["Название"]} ({s["Длительность"]} мин)'
-        chk = ctk.CTkCheckBox(services_frame, text=txt, variable=var)
-        chk.grid(row=i, column=0, sticky="w", pady=1, padx=5)
-        service_vars.append((s["ID"], var, int(s["Длительность"] or 30), s["Название"]))
-
-    def get_selected_services():
-        res = []
-        for sid, var, dur, name in service_vars:
-            if var.get():
-                res.append((sid, name, dur))
-        return res
 
 
     ctk.CTkLabel(dialog, text="Время").grid(row=row, column=0, padx=10, pady=5)
@@ -442,7 +440,11 @@ def open_add_appointment_dialog(app):
         cli_val = combo_cli.get()
         time_val = fields['Время'].get()
 
-        selected_services = get_selected_services()
+        sketch_id = None
+        if "ID_Эскиза" in fields:
+            sketch_name = fields["ID_Эскиза"].get().strip()
+            if sketch_name:
+                sketch_id = name_to_id_sketch.get(sketch_name)
 
         if not all([date_val, cli_val, time_val]):
             messagebox.showwarning("!",
@@ -450,14 +452,12 @@ def open_add_appointment_dialog(app):
                                    parent=dialog)
             return
 
-        if not selected_services:
-            messagebox.showwarning("!",
-                                   "Выберите хотя бы одну услугу.",
-                                   parent=dialog)
+        service_name = combo_service.get().strip()
+        if not service_name or service_name not in service_name_to_info:
+            messagebox.showwarning("!", "Выберите услугу.", parent=dialog)
             return
 
-        # Суммарная длительность всех выбранных услуг (в минутах)
-        total_duration = sum(d for _, _, d in selected_services)
+        service_id, total_duration = service_name_to_info[service_name]
 
         # Разбор времени
         try:
@@ -524,23 +524,11 @@ def open_add_appointment_dialog(app):
                 )
                 return
 
-        first_service_id = selected_services[0][0]
         cur.execute(
-            'INSERT INTO "Записи" ("Дата","Время","ID_Клиента","ID_Услуги") '
-            'VALUES (?,?,?,?)',
-            (date_val, time_val_norm, cli_id, first_service_id)
+            'INSERT INTO "Записи" ("Дата","Время","ID_Клиента","ID_Услуги","ID_Эскиза") '
+            'VALUES (?,?,?,?,?)',
+            (date_val, time_val_norm, cli_id, service_id, sketch_id)
         )
-        record_id = cur.lastrowid
-
-        service_ids = []
-        service_names = []
-        for sid, name, dur in selected_services:
-            service_ids.append(sid)
-            service_names.append(name)
-            cur.execute(
-                'INSERT INTO "Запись_Услуги" ("ID_Записи","ID_Услуги") VALUES (?, ?)',
-                (record_id, sid)
-            )
 
         app.conn.commit()
         messagebox.showinfo(
@@ -690,28 +678,21 @@ def open_edit_record_dialog(app):
             pass
         row += 1
 
-        cursor.execute(
-            'SELECT u."Название" FROM "Запись_Услуги" zu '
-            'JOIN "Услуги" u ON zu."ID_Услуги" = u.ID '
-            'WHERE zu."ID_Записи" = ?',
-            (record_id,)
-        )
-        svc_rows = cursor.fetchall()
-        service_names = [r["Название"] for r in svc_rows]
-        if not service_names and record["ID_Услуги"]:
+        service_name = None
+        if record["ID_Услуги"]:
             cursor.execute(
                 'SELECT "Название" FROM "Услуги" WHERE ID = ?',
                 (record["ID_Услуги"],)
             )
             r = cursor.fetchone()
             if r:
-                service_names = [r["Название"]]
+                service_name = r["Название"]
 
-        if service_names:
-            ctk.CTkLabel(dialog, text="Услуги:").grid(row=row, column=0, padx=10, pady=5, sticky="nw")
+        if service_name:
+            ctk.CTkLabel(dialog, text="Услуга:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
             ctk.CTkLabel(
                 dialog,
-                text=" + ".join(service_names),
+                text=service_name,
                 wraplength=260,
                 justify="left",
             ).grid(row=row, column=1, columnspan=2, padx=10, pady=5, sticky="w")
@@ -929,6 +910,67 @@ def open_add_record_dialog(app):
     ctk.CTkButton(dialog, text="Сохранить", command=save).grid(
         row=len(columns), columnspan=2, pady=10
     )
+def open_finance_date_picker(app, target_entry):
+    """Открыть календарь и записать выбранную дату в target_entry (формат YYYY-MM-DD)."""
+    top = tk.Toplevel(app)
+    top.title("Выберите дату")
+    top.transient(app)
+    top.grab_set()
+    top.geometry("300x320")
+    center_dialog(app, top)
+
+    cur_date = datetime.date.today().replace(day=1)
+    header = tk.Frame(top)
+    header.pack(fill="x", pady=4)
+    month_label = tk.Label(header, text=cur_date.strftime('%B %Y').capitalize(), font=("Arial", 12, "bold"))
+    month_label.pack(side="top", pady=2)
+    cal_fr = tk.Frame(top)
+    cal_fr.pack(padx=6, pady=6)
+
+    def render(month_date):
+        for w in cal_fr.winfo_children():
+            w.destroy()
+        month_label.config(text=month_date.strftime('%B %Y').capitalize())
+        cal = calendar.monthcalendar(month_date.year, month_date.month)
+        days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        for c, d in enumerate(days):
+            tk.Label(cal_fr, text=d, width=4, fg="#666666").grid(row=0, column=c)
+        for r, week in enumerate(cal, start=1):
+            for c, d in enumerate(week):
+                if d == 0:
+                    tk.Label(cal_fr, text="", width=4).grid(row=r, column=c, padx=2, pady=2)
+                    continue
+
+                def on_choose(day=d, md=month_date):
+                    chosen = datetime.date(md.year, md.month, day)
+                    target_entry.delete(0, tk.END)
+                    target_entry.insert(0, str(chosen))
+                    top.destroy()
+
+                btn = tk.Button(cal_fr, text=str(d), width=4, command=on_choose)
+                if datetime.date.today() == datetime.date(month_date.year, month_date.month, d):
+                    btn.config(relief='solid')
+                btn.grid(row=r, column=c, padx=2, pady=2)
+
+    def prev_month():
+        nonlocal cur_date
+        y, m = (cur_date.year, cur_date.month - 1) if cur_date.month > 1 else (cur_date.year - 1, 12)
+        cur_date = cur_date.replace(year=y, month=m)
+        render(cur_date)
+
+    def next_month():
+        nonlocal cur_date
+        y, m = (cur_date.year, cur_date.month + 1) if cur_date.month < 12 else (cur_date.year + 1, 1)
+        cur_date = cur_date.replace(year=y, month=m)
+        render(cur_date)
+
+    nav = tk.Frame(top)
+    nav.pack(fill="x", pady=5)
+    tk.Button(nav, text="◀", command=prev_month, width=3).pack(side="left", padx=10)
+    tk.Button(nav, text="▶", command=next_month, width=3).pack(side="right", padx=10)
+    render(cur_date)
+
+
 def open_schedule_date_picker(app):
     top = tk.Toplevel(app)
     top.title("Выберите дату")

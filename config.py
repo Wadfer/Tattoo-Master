@@ -21,8 +21,8 @@ FIXED_ENTITIES = [
 INITIAL_SCHEMAS = {
     "Услуги": "ID INTEGER PRIMARY KEY AUTOINCREMENT, Название TEXT, Цена REAL, Длительность INTEGER",
     "Клиенты": "ID INTEGER PRIMARY KEY AUTOINCREMENT, ФИО TEXT, Телефон TEXT",
-    # Для совместимости оставляем ID_Услуги (как «основная услуга»), а список услуг живёт в таблице Запись_Услуги
-    "Записи": "ID INTEGER PRIMARY KEY AUTOINCREMENT, Дата TEXT, Время TEXT, ID_Клиента INTEGER, ID_Услуги INTEGER",
+    # В записях теперь одна основная услуга (ID_Услуги) и, при необходимости, связанный эскиз (ID_Эскиза)
+    "Записи": "ID INTEGER PRIMARY KEY AUTOINCREMENT, Дата TEXT, Время TEXT, ID_Клиента INTEGER, ID_Услуги INTEGER, ID_Эскиза INTEGER",
     "Финансы": "ID INTEGER PRIMARY KEY AUTOINCREMENT, Тип TEXT, Сумма REAL, Дата TEXT, Описание TEXT",
     # Эскизы: хранение каталога идей/референсов (файл — путь на диске)
     "Эскизы": "ID INTEGER PRIMARY KEY AUTOINCREMENT, Название TEXT, Стиль TEXT, Описание TEXT, Файл TEXT",

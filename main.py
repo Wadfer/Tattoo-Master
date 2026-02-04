@@ -28,7 +28,11 @@ class DBApp(ctk.CTk):
 
         self.calendar_date = datetime.date.today()
         self.schedule_date = datetime.date.today()
-        self.finance_date = datetime.date.today()
+        # Период для вкладки «Финансы»: по умолчанию текущий месяц
+        today = datetime.date.today()
+        self.finance_date_start = today.replace(day=1)
+        _, last_day = calendar.monthrange(today.year, today.month)
+        self.finance_date_end = today.replace(day=last_day)
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -143,11 +147,6 @@ class DBApp(ctk.CTk):
             return
         if messagebox.askyesno("Подтверждение", "Удалить запись?"):
             record_id = self.selected_card.record_id
-            if self.current_entity == "Услуги":
-                try:
-                    self.conn.execute('DELETE FROM "Запись_Услуги" WHERE "ID_Услуги" = ?', (record_id,))
-                except Exception:
-                    pass
             self.conn.execute(f'DELETE FROM "{self.current_entity}" WHERE ID = ?', (record_id,))
             self.conn.commit()
             self._display_entity_data(self.current_entity)
@@ -167,14 +166,6 @@ class DBApp(ctk.CTk):
     def change_schedule_date(self, delta):
         self.schedule_date += datetime.timedelta(days=delta)
         self._display_entity_data("Расписание")
-
-    def change_finance_month(self, delta):
-        current_year = self.finance_date.year
-        current_month = self.finance_date.month
-        new_month = (current_month - 1 + delta) % 12 + 1
-        new_year = current_year + (current_month - 1 + delta) // 12
-        self.finance_date = datetime.date(new_year, new_month, 1)
-        self._display_entity_data("Финансы")
 
     def _select_card(self, card):
         for c in self.card_frames:

@@ -12,12 +12,8 @@ try:
 except Exception:  # Pillow может отсутствовать в окружении
     Image = None
 
-def get_monthly_finance_data(conn, target_date):
-    year, month = target_date.year, target_date.month
-    start_date = datetime.date(year, month, 1)
-    _, last_day = calendar.monthrange(year, month)
-    end_date = datetime.date(year, month, last_day)
-
+def get_finance_data_by_range(conn, start_date, end_date):
+    """Запрос к БД: прибыль и список операций за период [start_date, end_date]."""
     cursor = conn.cursor()
     cursor.execute(
         """SELECT SUM(Сумма) FROM "Финансы"
@@ -42,49 +38,63 @@ def get_monthly_finance_data(conn, target_date):
     transactions = cursor.fetchall()
 
     return {
-        "total_income": total_income,
-        "total_expense": total_expense,
         "profit": total_income - total_expense,
         "transactions": transactions,
     }
 
 
 def display_finance_report_view(app):
-    from dialogs import open_add_finance_dialog
+    from dialogs import open_finance_date_picker
 
-    app.top_controls.grid_columnconfigure((0, 1, 2, 3), weight=0)
-    app.top_controls.grid_columnconfigure(0, weight=1)
-    app.top_controls.grid_columnconfigure(1, weight=2)
-    app.top_controls.grid_columnconfigure(2, weight=1)
+    app.top_controls.grid_columnconfigure((0, 1, 2, 3, 4, 5), weight=0)
+    app.top_controls.grid_columnconfigure(1, weight=1)
     app.top_controls.grid_columnconfigure(3, weight=1)
 
+    ctk.CTkLabel(app.top_controls, text="Начальная дата:").grid(row=0, column=0, padx=(10, 5), pady=10, sticky="w")
+    entry_start = ctk.CTkEntry(app.top_controls, width=120)
+    entry_start.insert(0, app.finance_date_start.strftime("%Y-%m-%d"))
+    entry_start.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
     ctk.CTkButton(
         app.top_controls,
-        text="< Пред.",
-        command=lambda: app.change_finance_month(-1),
-    ).grid(row=0, column=0, padx=5, sticky="w")
+        text="Выбрать дату",
+        width=110,
+        command=lambda: open_finance_date_picker(app, entry_start),
+    ).grid(row=0, column=2, padx=5, pady=10, sticky="w")
 
-    month_name = app.finance_date.strftime("%B %Y").capitalize()
-    ctk.CTkLabel(
+    ctk.CTkLabel(app.top_controls, text="Конечная дата:").grid(row=0, column=3, padx=(15, 5), pady=10, sticky="w")
+    entry_end = ctk.CTkEntry(app.top_controls, width=120)
+    entry_end.insert(0, app.finance_date_end.strftime("%Y-%m-%d"))
+    entry_end.grid(row=0, column=4, padx=5, pady=10, sticky="ew")
+    ctk.CTkButton(
         app.top_controls,
-        text=month_name,
-        font=ctk.CTkFont(size=18, weight="bold"),
-    ).grid(row=0, column=1, sticky="ew")
+        text="Выбрать дату",
+        width=110,
+        command=lambda: open_finance_date_picker(app, entry_end),
+    ).grid(row=0, column=5, padx=5, pady=10, sticky="w")
+
+    def apply_range():
+        try:
+            start_str = entry_start.get().strip()
+            end_str = entry_end.get().strip()
+            app.finance_date_start = datetime.datetime.strptime(start_str, "%Y-%m-%d").date()
+            app.finance_date_end = datetime.datetime.strptime(end_str, "%Y-%m-%d").date()
+            if app.finance_date_start > app.finance_date_end:
+                messagebox.showwarning("Предупреждение", "Начальная дата не может быть позже конечной.", parent=app)
+                return
+            app._display_entity_data("Финансы")
+        except ValueError:
+            messagebox.showwarning("Предупреждение", "Введите даты в формате ГГГГ-ММ-ДД.", parent=app)
 
     ctk.CTkButton(
         app.top_controls,
-        text="След. >",
-        command=lambda: app.change_finance_month(1),
-    ).grid(row=0, column=3, padx=5, sticky="e")
+        text="Показать прибыль",
+        fg_color="#1F6AA5",
+        command=apply_range,
+    ).grid(row=0, column=6, padx=15, pady=10, sticky="ew")
 
-    ctk.CTkButton(
-        app.top_controls,
-        text="➕ Добавить",
-        fg_color="green",
-        command=lambda: open_add_finance_dialog(app),
-    ).grid(row=0, column=2, padx=5, sticky="ew")
-
-    finance_data = get_monthly_finance_data(app.conn, app.finance_date)
+    finance_data = get_finance_data_by_range(
+        app.conn, app.finance_date_start, app.finance_date_end
+    )
 
     for widget in app.scrollable_cards_frame.winfo_children():
         widget.destroy()
@@ -95,27 +105,24 @@ def display_finance_report_view(app):
 
     summary_frame = ctk.CTkFrame(app.scrollable_cards_frame, fg_color="transparent")
     summary_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-    summary_frame.grid_columnconfigure((0, 1, 2), weight=1)
+    summary_frame.grid_columnconfigure(0, weight=1)
 
-    def create_sum_box(col, title, val, color):
-        fr = ctk.CTkFrame(summary_frame, border_width=2, border_color=color)
-        fr.grid(row=0, column=col, padx=5, sticky="nsew")
-        ctk.CTkLabel(fr, text=title, text_color="#A9A9A9").pack(pady=(5, 0))
-        ctk.CTkLabel(
-            fr,
-            text=f"{val:,.2f}",
-            font=("Arial", 20, "bold"),
-            text_color=color,
-        ).pack(pady=(0, 5))
-
-    create_sum_box(0, "ДОХОД", finance_data["total_income"], "#32CD32")
-    create_sum_box(1, "РАСХОД", finance_data["total_expense"], "#C00000")
-    create_sum_box(
-        2,
-        "ПРИБЫЛЬ",
-        finance_data["profit"],
-        "#32CD32" if finance_data["profit"] >= 0 else "#FF4500",
-    )
+    period_text = f"{app.finance_date_start.strftime('%d.%m.%Y')} — {app.finance_date_end.strftime('%d.%m.%Y')}"
+    profit_color = "#32CD32" if finance_data["profit"] >= 0 else "#FF4500"
+    profit_frame = ctk.CTkFrame(summary_frame, border_width=2, border_color=profit_color)
+    profit_frame.grid(row=0, column=0, padx=5, sticky="ew")
+    profit_frame.grid_columnconfigure(0, weight=1)
+    ctk.CTkLabel(
+        profit_frame,
+        text=f"Прибыль за период {period_text}",
+        text_color="#A9A9A9",
+    ).pack(pady=(8, 0))
+    ctk.CTkLabel(
+        profit_frame,
+        text=f"{finance_data['profit']:,.2f} руб.",
+        font=("Arial", 22, "bold"),
+        text_color=profit_color,
+    ).pack(pady=(0, 8))
 
     for i, trans in enumerate(finance_data["transactions"]):
         fr = ctk.CTkFrame(app.scrollable_cards_frame)
@@ -140,9 +147,11 @@ def get_appointment_data(conn, date):
             z.ID,
             z.Время,
             z.ID_Услуги,
-            c.ФИО as Клиент
+            c.ФИО as Клиент,
+            u.Название as Услуга
         FROM "Записи" z
         LEFT JOIN "Клиенты" c ON z.ID_Клиента = c.ID
+        LEFT JOIN "Услуги" u ON z.ID_Услуги = u.ID
         WHERE z.Дата = ?
         ORDER BY z.Время
     """,
@@ -155,24 +164,9 @@ def get_appointment_data(conn, date):
     for r in base_records:
         rid = r["ID"]
 
-        cur2 = conn.cursor()
-        cur2.execute(
-            'SELECT u."Название" FROM "Запись_Услуги" zu '
-            'JOIN "Услуги" u ON zu."ID_Услуги" = u.ID '
-            'WHERE zu."ID_Записи" = ?',
-            (rid,)
-        )
-        svc_rows = cur2.fetchall()
-        service_names = [s["Название"] for s in svc_rows]
-
-        if not service_names and r["ID_Услуги"]:
-            cur2.execute(
-                'SELECT "Название" FROM "Услуги" WHERE ID=?',
-                (r["ID_Услуги"],)
-            )
-            s = cur2.fetchone()
-            if s:
-                service_names = [s["Название"]]
+        service_names = []
+        if r["Услуга"]:
+            service_names = [r["Услуга"]]
 
         total_duration = get_appointment_duration(conn, rid, r["ID_Услуги"])
         start_min = time_str_to_minutes(r["Время"])
@@ -333,8 +327,7 @@ def display_schedule_view(app, appointments, date):
 
 
 def complete_appointment(app, record_id):
-    """Отметить запись как завершённую и записать доход в таблицу Финансы.
-    Сумма = сумма цен всех услуг этой записи."""
+    """Отметить запись как завершённую: записать доход в Финансы и удалить её из Расписания."""
     import datetime
 
     cur = app.conn.cursor()
@@ -348,25 +341,10 @@ def complete_appointment(app, record_id):
     service_id = rec["ID_Услуги"]
     date_str = rec["Дата"] or datetime.date.today().strftime("%Y-%m-%d")
 
-    cur.execute(
-        'SELECT u."Цена", u."Название" FROM "Запись_Услуги" zu '
-        'JOIN "Услуги" u ON zu."ID_Услуги" = u.ID '
-        'WHERE zu."ID_Записи" = ?',
-        (record_id,)
-    )
-    svc_rows = cur.fetchall()
-
     prices = []
     names = []
 
-    for s in svc_rows:
-        try:
-            prices.append(float(s["Цена"]) if s["Цена"] is not None else 0.0)
-        except Exception:
-            prices.append(0.0)
-        names.append(s["Название"] or "")
-
-    if not svc_rows and service_id:
+    if service_id:
         cur.execute(
             'SELECT "Цена", "Название" FROM "Услуги" WHERE ID = ?',
             (service_id,),
@@ -380,7 +358,7 @@ def complete_appointment(app, record_id):
             names.append(s["Название"] or "")
 
     total_amount = sum(prices)
-    service_name = " + ".join([n for n in names if n])
+    service_name = " + ".join([n for n in names if n]) if names else ""
 
     cur.execute(
         'SELECT "ФИО" FROM "Клиенты" WHERE ID = ?',
@@ -397,11 +375,16 @@ def complete_appointment(app, record_id):
         "VALUES (?, ?, ?, ?)",
         (tipo, total_amount, date_str, description),
     )
+
+    # После фиксации дохода удаляем саму запись из таблицы "Записи"
+    app.conn.execute('DELETE FROM "Записи" WHERE ID = ?', (record_id,))
     app.conn.commit()
 
     try:
         y, m, d = map(int, date_str.split("-"))
-        app.finance_date = datetime.date(y, m, 1)
+        app.finance_date_start = datetime.date(y, m, 1)
+        _, last_day = calendar.monthrange(y, m)
+        app.finance_date_end = datetime.date(y, m, last_day)
     except Exception:
         pass
 
@@ -418,8 +401,6 @@ def display_entity_cards(app, entity_name, records, columns):
     app.card_frames = []
     app.scrollable_cards_frame.grid_columnconfigure((0, 1, 2), weight=1)
     column_names = [name for name, _ in columns]
-    if entity_name == "Записи":
-        column_names = [name for name in column_names if name != "ID_Услуги"]
     for index, record in enumerate(records):
         row, col = divmod(index, 3)
 
@@ -526,6 +507,17 @@ def display_entity_cards(app, entity_name, records, columns):
                     )
                     service_row = cursor.fetchone()
                     value = service_row["Название"] if service_row else "Не указана"
+                elif name == "ID_Эскиза":
+                    display_label = "Эскиз"
+                    if record[name]:
+                        cursor.execute(
+                            'SELECT "Название" FROM "Эскизы" WHERE ID = ?',
+                            (record[name],),
+                        )
+                        sketch_row = cursor.fetchone()
+                        value = sketch_row["Название"] if sketch_row else "Не выбран"
+                    else:
+                        value = "Не выбран"
 
             text_color = "white"
 
@@ -547,42 +539,6 @@ def display_entity_cards(app, entity_name, records, columns):
                 break
 
         if entity_name == "Записи":
-            cursor = app.conn.cursor()
-            cursor.execute(
-                'SELECT u."Название" FROM "Запись_Услуги" zu '
-                'JOIN "Услуги" u ON zu."ID_Услуги" = u.ID '
-                'WHERE zu."ID_Записи" = ?',
-                (record["ID"],)
-            )
-            svc_rows = cursor.fetchall()
-            service_names = [r["Название"] for r in svc_rows]
-
-            if not service_names and "ID_Услуги" in record.keys() and record["ID_Услуги"]:
-                cursor.execute(
-                    'SELECT "Название" FROM "Услуги" WHERE ID = ?',
-                    (record["ID_Услуги"],)
-                )
-                r = cursor.fetchone()
-                if r:
-                    service_names = [r["Название"]]
-
-            if service_names:
-                ctk.CTkLabel(
-                    card,
-                    text="Услуги:",
-                    text_color="#aaaaaa",
-                ).grid(row=data_rows, column=0, padx=(10, 5), pady=2, sticky="w")
-
-                ctk.CTkLabel(
-                    card,
-                    text=" + ".join(service_names),
-                    font=ctk.CTkFont(size=10),
-                    text_color="#CCCCCC",
-                    wraplength=260,
-                    justify="left",
-                ).grid(row=data_rows, column=1, padx=(5, 10), pady=2, sticky="w")
-                data_rows += 1
-
             def _complete(rid=record["ID"]):
                 complete_appointment(app, rid)
 

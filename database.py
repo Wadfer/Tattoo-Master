@@ -48,18 +48,10 @@ def initialize_database(conn):
             columns = [col[1] for col in cursor.fetchall()]
             if 'ID_Услуги' not in columns:
                 conn.execute('ALTER TABLE "Записи" ADD COLUMN "ID_Услуги" INTEGER')
+            if 'ID_Эскиза' not in columns:
+                conn.execute('ALTER TABLE "Записи" ADD COLUMN "ID_Эскиза" INTEGER')
         except sqlite3.Error:
             pass
-
-        try:
-            conn.execute(
-                'CREATE TABLE IF NOT EXISTS "Запись_Услуги" ('
-                'ID INTEGER PRIMARY KEY AUTOINCREMENT, '
-                '"ID_Записи" INTEGER, '
-                '"ID_Услуги" INTEGER)'
-            )
-        except sqlite3.Error as e:
-            print(f"Ошибка создания таблицы Запись_Услуги: {e}")
 
         # Сидирование услуг для тату-мастера (если таблица пустая)
         try:
@@ -71,6 +63,12 @@ def initialize_database(conn):
                     'INSERT INTO "Услуги" ("Название","Цена","Длительность") VALUES (?,?,?)',
                     DEFAULT_TATTOO_SERVICES,
                 )
+        except sqlite3.Error:
+            pass
+
+        # Удаляем больше не используемую таблицу связей "Запись_Услуги"
+        try:
+            conn.execute('DROP TABLE IF EXISTS "Запись_Услуги"')
         except sqlite3.Error:
             pass
 
